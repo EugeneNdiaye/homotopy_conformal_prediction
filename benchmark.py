@@ -4,19 +4,32 @@ import intervals
 from sklearn import datasets
 from sklearn.model_selection import train_test_split
 from split_conformal_prediction import conf_pred as split_conf_pred
-from tools import logcosh_reg, linex_reg, cross_val
+from tools import logcosh_reg, linex_reg, cross_val, set_style
 from sklearn.linear_model import lasso_path
 import time
 from sklearn.datasets import make_regression
+from matplotlib import pyplot as plt
+
+plt.rcParams["text.usetex"] = True
+set_style()
 
 random_state = np.random.randint(100)
 print("random_state = ", random_state)
 
+display_figure = False
+
+# The results will be averaged over n_repet repetitions of randomly held-out
+# validation data sets
+n_repet = 2
+
+# The homotopy algorithm will be launched for the following tolerance on
+# the optimization error
 tol_scales = [1e-2, 1e-4, 1e-6, 1e-8]
 n_tols = len(tol_scales)
-repet = 100
-# alpha = 0.1
-alpha = 0.9
+
+# Coverage levels
+alphas = np.array([0.1])
+# alphas = np.arange(1, 10) / 10
 
 method = "lasso"
 # method = "logcosh"
@@ -58,7 +71,6 @@ if dataset is "synthetic":
                                      n_features=n_features,
                                      random_state=random_state)
 
-
 print("Benchmarks on", dataset, "with", method)
 max_iter = int(1e8)
 
@@ -84,80 +96,118 @@ Y_train, Y_test = np.asfortranarray(Y_train), np.asfortranarray(Y_test)
 # we select lambda_ by cross validation on the training set
 lambda_ = cross_val(X_train, Y_train, method)
 
-res_oracle = np.zeros(3)
-res_split = np.zeros(3)
-res_approx = np.zeros((3, n_tols))
-cov_range = 0
 
-# Conformal prediction set is computed on the test set
-print("Number of repetition is ", repet)
-random_int = np.arange(Y_test.shape[0])
+def bench_on_coverage(alpha):
 
-for i_repet in range(repet):
+    res_oracle = np.zeros(3)
+    res_split = np.zeros(3)
+    res_approx = np.zeros((3, n_tols))
+    cov_range = 0
 
-    # print(i_repet, sep=" ", end=" ")
-    print(i_repet)
+    # Conformal prediction set is computed on the test set
+    print("alpha is", alpha, "and number of repetition is ", n_repet)
+    random_int = np.arange(Y_test.shape[0])
 
-    np.random.shuffle(random_int)
-    X, Y = X_test[random_int, :], Y_test[random_int]
-    X_seen = X[:-1, :]
-    Y_seen, Y_left = Y[:-1], Y[-1]
+    for i_repet in range(n_repet):
 
-    # Range
-    Y_range = np.min(Y_seen), np.max(Y_seen)
-    cov_range += Y_left in intervals.closed(Y_range[0], Y_range[1])
+        # print(i_repet, sep=" ", end=" ")
+        print(i_repet)
 
-    # Oracle
-    tic = time.time()
-    if method is "lasso":
-        lmd = [lambda_ / X.shape[0]]
-        res = lasso_path(X, Y, alphas=lmd, eps=1e-12, max_iter=max_iter)
-        coef_or = res[1].ravel()
+        np.random.shuffle(random_int)
+        X, Y = X_test[random_int, :], Y_test[random_int]
+        Y_seen, Y_left = Y[:-1], Y[-1]
 
-    elif method is "logcosh":
-        coef_or = logcosh_reg(X, Y, lambda_)
+        # Range
+        Y_range = np.min(Y_seen), np.max(Y_seen)
+        cov_range += Y_left in intervals.closed(Y_range[0], Y_range[1])
 
-    elif method is "linex":
-        coef_or = linex_reg(X, Y, lambda_)
-
-    residual_or = np.abs(Y - X.dot(coef_or))
-    q_alpha_or = np.quantile(residual_or, 1 - alpha)
-    mu_or = X[-1:].dot(coef_or)[0]
-    l_or = mu_or - q_alpha_or
-    r_or = mu_or + q_alpha_or
-    set_or = intervals.closed(l_or, r_or)
-    res_oracle[2] += time.time() - tic
-    res_oracle[0] += Y_left in set_or
-    res_oracle[1] += r_or - l_or
-
-    # Split
-    tic = time.time()
-    split_pred_set = split_conf_pred(X, Y_seen, lambda_, Y_range, alpha,
-                                     method)
-    res_split[2] += time.time() - tic
-    res_split[0] += Y_left in split_pred_set
-    res_split[1] += split_pred_set.upper - split_pred_set.lower
-
-    # Ridge approximated conformal prediction with different precisions
-    for i_tol, tol_scale in enumerate(tol_scales):
-
-        epsilon = tol_scale * np.linalg.norm(Y_seen) ** 2
-        # TODO: double check nu
+        # Oracle
         tic = time.time()
-        pred_set = conf_pred(X, Y_seen, lambda_, Y_range, alpha, epsilon,
-                             method=method)
-        res_approx[2, i_tol] += time.time() - tic
-        # We consider the convex hull
-        res_approx[0, i_tol] += Y_left in intervals.closed(
-            pred_set.lower, pred_set.upper)
-        res_approx[1, i_tol] += pred_set.upper - pred_set.lower
+        if method is "lasso":
+            lmd = [lambda_ / X.shape[0]]
+            res = lasso_path(X, Y, alphas=lmd, eps=1e-12, max_iter=max_iter)
+            coef_or = res[1].ravel()
 
-res_oracle /= repet
-res_split /= repet
-res_approx /= repet
+        elif method is "logcosh":
+            coef_or = logcosh_reg(X, Y, lambda_)
 
-print("\n")
-print("cov range: \n", cov_range / repet)
-print("Oracle: \n", res_oracle)
-print("Split: \n", res_split)
-print("Approx: \n", res_approx.T)
+        elif method is "linex":
+            coef_or = linex_reg(X, Y, lambda_)
+
+        residual_or = np.abs(Y - X.dot(coef_or))
+        q_alpha_or = np.quantile(residual_or, 1 - alpha)
+        mu_or = X[-1:].dot(coef_or)[0]
+        l_or = mu_or - q_alpha_or
+        r_or = mu_or + q_alpha_or
+        set_or = intervals.closed(l_or, r_or)
+        res_oracle[2] += time.time() - tic
+        res_oracle[0] += Y_left in set_or
+        res_oracle[1] += r_or - l_or
+
+        # Split
+        tic = time.time()
+        split_pred_set = split_conf_pred(X, Y_seen, lambda_, Y_range, alpha,
+                                         method)
+        res_split[2] += time.time() - tic
+        res_split[0] += Y_left in split_pred_set
+        res_split[1] += split_pred_set.upper - split_pred_set.lower
+
+        # Ridge approximated conformal prediction with different precisions
+        for i_tol, tol_scale in enumerate(tol_scales):
+
+            epsilon = tol_scale * np.linalg.norm(Y_seen) ** 2
+            # TODO: double check nu
+            tic = time.time()
+            pred_set = conf_pred(X, Y_seen, lambda_, Y_range, alpha, epsilon,
+                                 method=method)
+            res_approx[2, i_tol] += time.time() - tic
+            # We consider the convex hull
+            res_approx[0, i_tol] += Y_left in intervals.closed(
+                pred_set.lower, pred_set.upper)
+            res_approx[1, i_tol] += pred_set.upper - pred_set.lower
+
+    res_oracle /= n_repet
+    res_split /= n_repet
+    res_approx /= n_repet
+
+    print("\n")
+    print("cov range: \n", cov_range / n_repet)
+    print("Oracle: \n", res_oracle)
+    print("Split: \n", res_split)
+    print("Approx: \n", res_approx.T)
+
+    return res_oracle, res_split, res_approx
+
+
+length_oracle = np.empty(alphas.shape[0])
+length_split = np.empty(alphas.shape[0])
+length_approx = np.empty((alphas.shape[0], n_tols))
+
+for i_alpha, alpha in enumerate(alphas):
+
+    res_oracle, res_split, res_approx = bench_on_coverage(alpha)
+
+    length_oracle[i_alpha] = res_oracle[1]
+    length_split[i_alpha] = res_split[1]
+
+    for i_tol, tol_scale in enumerate(tol_scales):
+        length_approx[i_alpha, i_tol] = res_approx[1, i_tol]
+
+
+if display_figure:
+    plt.figure()
+    plt.plot(alphas, length_oracle, label="Oracle")
+    plt.plot(alphas, length_split, label="Split")
+
+    for i_tol, tol_scale in enumerate(tol_scales):
+        tol_char = str(int(-np.log10(tol_scale)))
+        plt.plot(alphas, length_approx[:, i_tol], label="1e-" + tol_char)
+
+    plt.xlabel("Coverage level " + r"$\alpha$")
+    plt.ylabel("Length of " + r"$\Gamma(x_{n+1})$")
+    plt.grid(None)
+    plt.legend()
+    plt.tight_layout()
+    name = "various_coverage_" + method + dataset + ".pdf"
+    # plt.savefig(name, format="pdf")
+    plt.show()

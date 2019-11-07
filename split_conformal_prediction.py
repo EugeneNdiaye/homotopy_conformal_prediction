@@ -2,7 +2,6 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from tools import logcosh_reg, linex_reg
 import intervals
-from sklearn.datasets import make_regression
 from sklearn.linear_model import lasso_path
 random_state = 414
 
@@ -33,19 +32,3 @@ def conf_pred(X, Y_seen, lambda_, Y_range, alpha=0.1, method="lasso"):
     mu = X[-1, :].dot(coef)
 
     return intervals.closed(mu - quantile, mu + quantile)
-
-
-if __name__ == '__main__':
-
-    alpha = 0.1
-    n_samples, n_features = (300, 100)
-    X, Y = make_regression(n_samples=n_samples, n_features=n_features,
-                           random_state=random_state)
-    Y = (Y - Y.mean()) / Y.std()
-    lambda_ = np.sqrt(np.log(n_features)) / n_samples
-    Y_range = np.min(Y[:-1]), np.max(Y[:-1])
-    epsilon = 1e-6 * np.linalg.norm(Y[:-1]) ** 2
-    print(epsilon)
-
-    pred_set = conf_pred(X, Y[:-1], lambda_, Y_range, alpha)
-    print(str(Y[-1]) + " in", pred_set, Y[-1] in pred_set)

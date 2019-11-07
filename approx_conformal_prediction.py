@@ -87,23 +87,3 @@ def conf_pred(X, Y_seen, lambda_, y_range, alpha=0.1, epsilon=1e-3, nu=1.,
         y_t = next_y_t
 
     return pred_set
-
-
-if __name__ == '__main__':
-
-    from sklearn.datasets import make_regression
-    random_state = 414
-    alpha = 0.1
-    n_samples, n_features = (30, 20)
-    X, Y = make_regression(n_samples=n_samples, n_features=n_features,
-                           random_state=random_state)
-    Y = (Y - Y.mean()) / Y.std()
-    lambda_ = np.sqrt(np.log(n_features)) / n_samples
-    Y_range = np.min(Y[:-1]), np.max(Y[:-1])
-    epsilon = 1e-2 * np.linalg.norm(Y[:-1]) ** 2
-    print(epsilon)
-
-    pred_set = conf_pred(X, Y[:-1], lambda_, Y_range, alpha, epsilon,
-                         method="logcosh")
-    pred_set = intervals.closed(pred_set.lower, pred_set.upper)
-    print(str(Y[-1]) + " in", pred_set, Y[-1] in pred_set)
